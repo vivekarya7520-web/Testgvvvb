@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#0b4ea2">
-<title>BEU Result — beuconnect</title>
+<title>BEU Result</title>
 <style>
   :root{--bg:#f5f6f9;--card:#fff;--tx:#14161a;--mut:#636b78;--br:#e2e5eb;--ac:#0b4ea2;--er:#c0392b}
   @media (prefers-color-scheme:dark){:root{--bg:#0e1014;--card:#161a20;--tx:#e9ebef;--mut:#98a0ad;--br:#242932;--ac:#3d82e8}}
@@ -82,8 +82,7 @@
 
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 <script>
-const SITEKEY = '0x4AAAAAADn09PiriH4xxgIz';
-const BASE = 'https://beu-bih.ac.in/backend/v1/result/';
+const SITEKEY = '0x4AAAAAAGWGO5slVeKX-WJV';
 const ROMAN = ['','I','II','III','IV','V','VI','VII','VIII'];
 const FALLBACK = [
   ['B.Tech','B.Tech 8th Semester Supplementary Examination 2026',2026,8,'August/2026','2601098'],
@@ -109,7 +108,7 @@ const FALLBACK = [
 
 const $ = (i) => document.getElementById(i);
 const course = $('course'), sel = $('exam'), reg = $('reg'), btn = $('go'), msg = $('msg'), out = $('out');
-let all = [], wid = null, token = '', bt = null, btAt = 0;
+let all = [], wid = null, token = '';
 
 const examOf = () => all.find(e => String(e.examId) === sel.value);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
@@ -147,15 +146,6 @@ function mount() {
       }
     });
   } catch (e) { msg.textContent = 'Widget load nahi hua. Reload karo.'; }
-}
-
-async function getBt(captcha) {
-  if (bt && Date.now() - btAt < 240000) return bt;
-  const r = await fetch(BASE + 'token?captcha=' + encodeURIComponent(captcha));
-  const j = await r.json();
-  if (!j || !j.token) throw new Error('Access denied.');
-  bt = j.token; btAt = Date.now();
-  return bt;
 }
 
 function table(title, rows) {
@@ -203,6 +193,122 @@ function render(data) {
     ['Examination year', find(/year/)],
     ['Remarks', find(/remark|result|status/)]
   ].filter(([, v]) => v);
+
+  const sgpa = find(/sgpa/), cgpa = find(/cgpa/);
+
+  let html = '<div class="card" id="res"><div class="rhead"><h2>' +
+    esc(examOf() ? examOf().name : 'Result') + '</h2>' +
+    '<span class="pill">' + esc(find(/remark|result/) || '—') + '</span></div>';
+
+  if (kv.length) html += '<dl class="kv">' + kv.map(([k, v]) => '<dt>' + k + '</dt><dd>' + esc(v) + '</dd>').join('') + '</dl>';
+
+  for (const [k, arr] of arrays) {
+    const rows = arr.filter(x => x && typeof x === 'object').map(x => {
+      const o = {};
+      for (const [kk, vv] of Object.entries(x)) {
+        if (typeof vv === 'string' || typeof vv === 'number') o[kk.replace(/_/g, ' ')] = vv;
+      }
+      return o;
+    });
+    if (rows.length) html += table(k.replace(/_/g, ' '), rows);
+  }
+
+  if (sgpa || cgpa) {
+    html += '<div class="sec-h">Summary</div><dl class="kv">' +
+      (sgpa ? '<dt>SGPA</dt><dd>' + esc(sgpa) + '</dd>' : '') +
+      (cgpa ? '<dt>CGPA</dt><dd>' + esc(cgpa) + '</dd>' : '') + '</dl>';
+  }
+
+  html += '</div><button class="sec" onclick="window.print()">PDF / Print</button>';
+  out.innerHTML = html;
+}
+
+function resetWidget() {
+  try { turnstile.reset(wid); } catch (e) {}
+  token = '';
+  sync();
+}
+
+async function go() {
+  const ex = examOf(), r = reg.value.trim();
+  if (!ex || !r || !token) return;
+  localStorage.setItem('beu.exam', sel.value);
+  btn.disabled = true;
+  msg.textContent = '';
+  out.innerHTML = '<div class="card"><span class="spin"></span>Fetch ho raha hai…</div>';
+
+  try {
+    const q = new URLSearchParams({
+      year: ex.batch, redg_no: r, semester: ROMAN[Number(ex.sem)] || String(ex.sem),
+      exam_held: ex.held, exam_id: ex.examId, captcha: token
+    });
+    const res = await fetch('/api/result?' + q);
+    const body = await res.json().catch(() => ({}));
+
+    if (res.status === 403) {
+      out.innerHTML = '';
+      msg.textContent = 'Verification reject hui. Naya check poora karo, phir dobara dabao.';
+      resetWidget();
+      return;
+    }
+    if (res.status === 404) {
+      out.innerHTML = '<div class="card"><p style="margin:0">Is reg no. ka result nahi mila.</p></div>';
+      resetWidget();
+      return;
+    }
+    if (!res.ok) {
+      out.innerHTML = '';
+      msg.textContent = 'Server error ' + res.status + '. Thodi der baad try karo.';
+      resetWidget();
+      return;
+    }
+
+    const data = body.data || body;
+    if (!data || !Object.keys(data).length) {
+      out.innerHTML = '<div class="card"><p style="margin:0">Is reg no. ka result nahi mila.</p></div>';
+    } else {
+      render(data);
+    }
+    resetWidget();
+  } catch (e) {
+    out.innerHTML = '';
+    msg.textContent = 'Kuch galat hua: ' + e.message;
+    resetWidget();
+  }
+}
+
+async function load() {
+  try {
+    const r = await fetch('/api/exams');
+    if (!r.ok) throw 0;
+    const d = await r.json();
+    const flat = [];
+    for (const c of d) for (const e of (c.exams || [])) {
+      flat.push({ course: c.courseName, name: e.examName, batch: e.batchYear, sem: e.semId, held: e.examHeld, examId: e.examId });
+    }
+    if (!flat.length) throw 0;
+    all = flat;
+  } catch {
+    all = FALLBACK.map(f => ({ course: f[0], name: f[1], batch: f[2], sem: f[3], held: f[4], examId: f[5] }));
+    msg.textContent = 'Live list load nahi hui — purani list dikha rahe hain.';
+  }
+  renderList();
+}
+
+course.addEventListener('change', () => { localStorage.setItem('beu.course', course.value); renderList(); });
+sel.addEventListener('change', () => { localStorage.setItem('beu.exam', sel.value); sync(); });
+reg.addEventListener('input', () => { reg.value = reg.value.replace(/\D/g, ''); sync(); });
+reg.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !btn.disabled) go(); });
+btn.addEventListener('click', go);
+
+course.value = localStorage.getItem('beu.course') || 'B.Tech';
+if (![...course.options].some(o => o.value === course.value)) course.value = 'B.Tech';
+
+const t = setInterval(() => { if (window.turnstile && turnstile.render) { clearInterval(t); mount(); } }, 300);
+load();
+</script>
+</body>
+</html> v]) => v);
 
   const sgpa = find(/sgpa/), cgpa = find(/cgpa/);
 
