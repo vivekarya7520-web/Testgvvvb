@@ -60,3 +60,9 @@ export default async function handler(req, res) {
   res.setHeader("cache-control", "s-maxage=600, stale-while-revalidate=3600");
   res.status(200).json(body);
 }
+headers: {
+  "Origin": "https://beu-bih.ac.in",
+  "Referer": "https://beu-bih.ac.in/result-two",
+  "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
+  "Accept": "application/json, text/plain, */*"
+}
